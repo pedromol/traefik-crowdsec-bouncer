@@ -7,22 +7,34 @@ import (
 )
 
 type Config struct {
-	BouncerApiKey   string
-	BouncerHost     string
-	BouncerScheme   string
-	BanResponseCode int
-	BanResponseMsg  string
-	ClientIPHeader  string
+	ListenAddr       string
+	BouncerApiKey    string
+	BouncerHost      string
+	BouncerScheme    string
+	BanResponseCode  int
+	BanResponseMsg   string
+	ClientIPHeader   string
+	CountryHeader    string
+	AllowedCountries string
+	RateLimit        int
+	BucketSize       int
 }
+
+const envPreffix = "CROWDSEC_BOUNCER_"
 
 func NewConfig() *Config {
 	return &Config{
-		BouncerApiKey:   requiredEnv("CROWDSEC_BOUNCER_API_KEY"),
-		BouncerHost:     requiredEnv("CROWDSEC_AGENT_HOST"),
-		BouncerScheme:   optionalEnv("CROWDSEC_BOUNCER_SCHEME", "http"),
-		BanResponseCode: expectedResponseCode("CROWDSEC_BOUNCER_BAN_RESPONSE_CODE"),
-		BanResponseMsg:  optionalEnv("CROWDSEC_BOUNCER_BAN_RESPONSE_MSG", "Forbidden"),
-		ClientIPHeader:  optionalEnv("CROWDSEC_BOUNCER_CLIENT_IP_HEADER", "X-Real-Ip"),
+		ListenAddr:       optionalEnv(envPreffix+"LISTEN_ADDRESS", ":8080"),
+		BouncerApiKey:    requiredEnv(envPreffix + "API_KEY"),
+		BouncerHost:      requiredEnv(envPreffix + "AGENT_HOST"),
+		BouncerScheme:    optionalEnv(envPreffix+"SCHEME", "http"),
+		BanResponseCode:  expectedResponseCode(envPreffix + "BAN_RESPONSE_CODE"),
+		BanResponseMsg:   optionalEnv(envPreffix+"BAN_RESPONSE_MSG", "Forbidden"),
+		ClientIPHeader:   optionalEnv(envPreffix+"CLIENT_IP_HEADER", "X-Real-Ip"),
+		CountryHeader:    optionalEnv(envPreffix+"COUNTRY_HEADER", ""),
+		AllowedCountries: optionalEnv(envPreffix+"ALLOWED_COUNTRIES", ""),
+		RateLimit:        optionalEnvInt(envPreffix+"RATE_LIMIT", 5),
+		BucketSize:       optionalEnvInt(envPreffix+"BUCKET_SIZE", 15),
 	}
 }
 
@@ -32,6 +44,18 @@ func optionalEnv(varName string, optional string) string {
 		return optional
 	}
 	return envVar
+}
+
+func optionalEnvInt(varName string, optional int) int {
+	envVar := os.Getenv(varName)
+	if envVar == "" {
+		return optional
+	}
+	val, err := strconv.Atoi(envVar)
+	if err != nil {
+		log.Fatalf("The env var %s could not be converted to number. Exiting", varName)
+	}
+	return val
 }
 
 func requiredEnv(varName string) string {
