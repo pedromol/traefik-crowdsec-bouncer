@@ -4,9 +4,11 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
+	LogLevel         string
 	ListenAddr       string
 	BouncerApiKey    string
 	BouncerHost      string
@@ -18,12 +20,25 @@ type Config struct {
 	AllowedCountries string
 	RateLimit        int
 	BucketSize       int
+	RedisAddresses   []string
+	RedisPassword    string
+	RedisMaster      string
 }
 
 const envPreffix = "CROWDSEC_BOUNCER_"
 
 func NewConfig() *Config {
+	redisAddr := make([]string, 0)
+	for _, envVar := range os.Environ() {
+		if strings.Contains(envVar, envPreffix+"REDIS_ADDRESS_") {
+			_, addr, f := strings.Cut(envVar, "=")
+			if f {
+				redisAddr = append(redisAddr, addr)
+			}
+		}
+	}
 	return &Config{
+		LogLevel:         optionalEnv(envPreffix+"LOG_LEVEL", ""),
 		ListenAddr:       optionalEnv(envPreffix+"LISTEN_ADDRESS", ":8080"),
 		BouncerApiKey:    requiredEnv(envPreffix + "API_KEY"),
 		BouncerHost:      requiredEnv(envPreffix + "AGENT_HOST"),
@@ -35,6 +50,9 @@ func NewConfig() *Config {
 		AllowedCountries: optionalEnv(envPreffix+"ALLOWED_COUNTRIES", ""),
 		RateLimit:        optionalEnvInt(envPreffix+"RATE_LIMIT", 5),
 		BucketSize:       optionalEnvInt(envPreffix+"BUCKET_SIZE", 15),
+		RedisPassword:    optionalEnv(envPreffix+"REDIS_PASSWORD", ""),
+		RedisAddresses:   redisAddr,
+		RedisMaster:      optionalEnv(envPreffix+"REDIS_MASTER", "mymaster"),
 	}
 }
 

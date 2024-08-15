@@ -49,7 +49,6 @@ type Decision struct {
 type ForwardAuth struct {
 	Cfg              config.Config
 	Client           *http.Client
-	IPs              []net.IP
 	Requests         int
 	Cache            cache.Cache
 	Limiter          limiter.Limiter
@@ -66,14 +65,6 @@ func NewForwardAuth(cfg config.Config, c cache.Cache, l limiter.Limiter) *Forwar
 				IdleConnTimeout: 30 * time.Second,
 			},
 			Timeout: 5 * time.Second,
-		},
-		IPs: []net.IP{
-			net.ParseIP("10.0.0.0"),
-			net.ParseIP("10.255.255.255"),
-			net.ParseIP("172.16.0.0"),
-			net.ParseIP("172.31.255.255"),
-			net.ParseIP("192.168.0.0"),
-			net.ParseIP("192.168.255.255"),
 		},
 		Cache:            c,
 		Limiter:          l,
@@ -141,19 +132,10 @@ func (f *ForwardAuth) isIpAuthorized(ctx context.Context, clientIP string) (bool
 	return len(decisions) == 0, dur, nil
 }
 
-func (f *ForwardAuth) ignoreIP(ip string) bool {
-	pIp := net.ParseIP(ip)
-
-	return pIp.To4() == nil ||
-		(bytes.Compare(pIp, f.IPs[0]) >= 0 && bytes.Compare(pIp, f.IPs[1]) <= 0) ||
-		(bytes.Compare(pIp, f.IPs[2]) >= 0 && bytes.Compare(pIp, f.IPs[3]) <= 0) ||
-		(bytes.Compare(pIp, f.IPs[4]) >= 0 && bytes.Compare(pIp, f.IPs[5]) <= 0)
-}
-
 func (f *ForwardAuth) getClientIp(r *http.Request) string {
 	for _, key := range []string{f.Cfg.ClientIPHeader, realIpHeader, forwardHeader} {
 		ip := r.Header.Get(key)
-		if ip != "" && !f.ignoreIP(ip) {
+		if ip != "" && !net.ParseIP(ip).IsPrivate() {
 			return ip
 		}
 	}
@@ -223,6 +205,7 @@ func (f *ForwardAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.Reply(w, r, clientIP, start, false)
 		return
 	}
+
 	if !isAuthorized {
 		f.Reply(w, r, clientIP, start, false)
 		go f.SetCache(clientIP, denied, d)
