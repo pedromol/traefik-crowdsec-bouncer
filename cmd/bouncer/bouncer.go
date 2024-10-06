@@ -10,6 +10,7 @@ import (
 	"github.com/pedromol/traefik-crowdsec-bouncer/pkg/forwardAuth"
 	"github.com/pedromol/traefik-crowdsec-bouncer/pkg/health"
 	"github.com/pedromol/traefik-crowdsec-bouncer/pkg/limiter"
+	"github.com/pedromol/traefik-crowdsec-bouncer/pkg/logger"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -27,13 +28,13 @@ func main() {
 		slog.SetLogLoggerLevel(lvl)
 	}
 
-	h := health.NewHealth()
-
+	var client *redis.ClusterClient
 	var c cache.Cache
 	var l limiter.Limiter
 	if len(cfg.RedisAddresses) > 0 {
 		slog.Debug("Using Redis as cache")
-		client := redis.NewFailoverClusterClient(&redis.FailoverOptions{
+		redis.SetLogger(logger.Logger{})
+		client = redis.NewFailoverClusterClient(&redis.FailoverOptions{
 			MasterName:       cfg.RedisMaster,
 			SentinelAddrs:    cfg.RedisAddresses,
 			SentinelPassword: cfg.RedisPassword,
@@ -48,6 +49,7 @@ func main() {
 		l = limiter.NewLocal(*cfg)
 	}
 
+	h := health.NewHealth(client)
 	f := forwardAuth.NewForwardAuth(*cfg, c, l)
 
 	http.Handle("/api/v1/health", h)

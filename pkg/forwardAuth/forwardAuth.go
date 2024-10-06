@@ -46,6 +46,11 @@ type Decision struct {
 	Simulated bool   `json:"simulated"`
 }
 
+type LocalIPs struct {
+	Elapsed time.Duration `json:"elapsed"`
+	IPs     []string      `json:"ips"`
+}
+
 type ForwardAuth struct {
 	Cfg              config.Config
 	Client           *http.Client
@@ -165,9 +170,46 @@ func (f *ForwardAuth) logAccess(r *http.Request, ip string, statusCode string, s
 	fmt.Println(ip, "-", user, "["+time.Now().Format("02/Jan/2006:15:04:05 -0700")+"]", "\""+r.Header.Get(methodHeader)+" "+r.Header.Get(uriHeader)+" "+r.Proto+"\"", statusCode, length, "\"-\"", "\""+userAgent+"\"", f.Requests, "\""+country+"@"+r.Header.Get(hostHeader)+"\"", "\"-\"", duration+"ms")
 }
 
+func (f ForwardAuth) getLocalIPs(ctx context.Context) []string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.Cfg.LocalIPs, nil)
+	if err != nil {
+		return []string{}
+	}
+	resp, err := f.Client.Do(req)
+	if err != nil {
+		return []string{}
+	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			slog.Error("An error occurred while closing body reader", "error", err.Error())
+		}
+	}(resp.Body)
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return []string{}
+	}
+	var localips LocalIPs
+	err = json.Unmarshal(reqBody, &localips)
+	if err != nil {
+		return []string{}
+	}
+	return localips.IPs
+}
+
 func (f *ForwardAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	clientIP := f.getClientIp(r)
+
+	if f.Cfg.LocalIPs != "" {
+		ips := f.getLocalIPs(r.Context())
+		if slices.Contains(ips, clientIP) {
+			slog.Debug("Local IP", "for", clientIP)
+			go f.SetCache(clientIP, allowed, time.Duration(time.Minute*10))
+			f.Reply(w, r, clientIP, start, true)
+			return
+		}
+	}
 
 	if len(f.AllowedCountries) > 0 && f.Cfg.CountryHeader != "" && !slices.Contains(f.AllowedCountries, r.Header.Get(f.Cfg.CountryHeader)) {
 		slog.Debug("Blocked country", "for", r.Header.Get(f.Cfg.CountryHeader))
@@ -178,6 +220,17 @@ func (f *ForwardAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("Rate limit hit", "for", clientIP)
 		f.Reply(w, r, clientIP, start, false)
 		return
+	}
+
+	if len(f.Cfg.BlockedPaths) > 0 {
+		for _, blockedPath := range f.Cfg.BlockedPaths {
+			if strings.Contains(r.Header.Get(uriHeader), blockedPath) {
+				slog.Debug("Blocked path", "for", r.Header.Get(uriHeader))
+				go f.SetCache(clientIP, denied, time.Duration(time.Minute*10))
+				f.Reply(w, r, clientIP, start, false)
+				return
+			}
+		}
 	}
 
 	cached, err := f.Cache.Get(r.Context(), clientIP)
@@ -202,7 +255,7 @@ func (f *ForwardAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	isAuthorized, d, err := f.isIpAuthorized(r.Context(), clientIP)
 	if err != nil {
 		slog.Warn("An error occurred while checking IP", "clientIP", clientIP, "error", err.Error())
-		f.Reply(w, r, clientIP, start, false)
+		f.Reply(w, r, clientIP, start, true)
 		return
 	}
 

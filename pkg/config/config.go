@@ -23,6 +23,8 @@ type Config struct {
 	RedisAddresses   []string
 	RedisPassword    string
 	RedisMaster      string
+	LocalIPs         string
+	BlockedPaths     []string
 }
 
 const envPreffix = "CROWDSEC_BOUNCER_"
@@ -53,6 +55,8 @@ func NewConfig() *Config {
 		RedisPassword:    optionalEnv(envPreffix+"REDIS_PASSWORD", ""),
 		RedisAddresses:   redisAddr,
 		RedisMaster:      optionalEnv(envPreffix+"REDIS_MASTER", "mymaster"),
+		LocalIPs:         optionalEnv(envPreffix+"LOCAL_IPS", ""),
+		BlockedPaths:     strings.Split(optionalEnv(envPreffix+"BLOCKED_PATHS", ""), ","),
 	}
 }
 
